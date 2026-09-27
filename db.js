@@ -1,6 +1,5 @@
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
-const fs = require('fs');
 
 function initDB() {
     const dbPath = path.resolve(__dirname, 'chatx.db');
@@ -13,6 +12,7 @@ function initDB() {
     });
 
     db.serialize(() => {
+        // إنشاء جدول المستخدمين
         db.run(`CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE,
@@ -21,6 +21,7 @@ function initDB() {
             role TEXT
         )`);
 
+        // إنشاء جدول الأصدقاء
         db.run(`CREATE TABLE IF NOT EXISTS friends (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
@@ -28,18 +29,44 @@ function initDB() {
             FOREIGN KEY(user_id) REFERENCES users(id)
         )`);
 
+        // إنشاء جدول الرسائل
         db.run(`CREATE TABLE IF NOT EXISTS messages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             sender TEXT,
             receiver TEXT,
+            group_id INTEGER,
             content TEXT,
             type TEXT DEFAULT 'text',
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )`);
 
-        db.run("ALTER TABLE users ADD COLUMN email TEXT", (err) => {});
-        db.run("ALTER TABLE messages ADD COLUMN hidden_from TEXT", (err) => {});
+        // إنشاء جدول المجموعات
+        db.run(`CREATE TABLE IF NOT EXISTS chat_groups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
+            group_pic TEXT,
+            created_by TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )`);
 
+        // إنشاء جدول أعضاء المجموعات
+        db.run(`CREATE TABLE IF NOT EXISTS group_members (
+            group_id INTEGER,
+            username TEXT,
+            FOREIGN KEY(group_id) REFERENCES chat_groups(id)
+        )`);
+
+        // محاولة إضافة الأعمدة الجديدة إن لم تكن موجودة (التحديثات)
+        db.run("ALTER TABLE users ADD COLUMN email TEXT", (err) => {});
+        db.run("ALTER TABLE users ADD COLUMN profile_pic TEXT", (err) => {});
+        db.run("ALTER TABLE messages ADD COLUMN hidden_from TEXT", (err) => {});
+        db.run("ALTER TABLE messages ADD COLUMN group_id INTEGER", (err) => {});
+        db.run("ALTER TABLE messages ADD COLUMN reply_to INTEGER", (err) => {});
+        db.run("ALTER TABLE messages ADD COLUMN is_forwarded INTEGER DEFAULT 0", (err) => {});
+        db.run("ALTER TABLE messages ADD COLUMN is_pinned INTEGER DEFAULT 0", (err) => {});
+        db.run("ALTER TABLE friends ADD COLUMN status TEXT DEFAULT 'accepted'", (err) => {});
+
+        // تهيئة بيانات الأدمن الثابت (Hardcoded Admin)
         const checkAdmin = "SELECT * FROM users WHERE username = 'admin'";
         db.get(checkAdmin, [], (err, row) => {
             if (!row) {
@@ -57,3 +84,4 @@ function initDB() {
 }
 
 module.exports = initDB;
+

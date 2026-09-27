@@ -3,11 +3,7 @@ const path = require('path');
 const fs = require('fs');
 
 function initDB() {
-    const dataDir = path.resolve(__dirname, '.data');
-    if (!fs.existsSync(dataDir)) {
-        fs.mkdirSync(dataDir);
-    }
-    const dbPath = path.resolve(dataDir, 'chatx.db');
+    const dbPath = path.resolve(__dirname, 'chatx.db');
     const db = new sqlite3.Database(dbPath, (err) => {
         if (err) {
             console.error("خطأ في الاتصال بقاعدة البيانات", err.message);

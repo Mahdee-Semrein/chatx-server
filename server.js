@@ -177,6 +177,16 @@ io.on('connection', (socket) => {
         });
     });
 
+    socket.on('get_group_members', (data) => {
+        const { group_id } = data;
+        db.all("SELECT username FROM group_members WHERE group_id = ?", [group_id], (err, rows) => {
+            if (!err) {
+                const members = rows.map(r => r.username);
+                socket.emit('group_members_list', { group_id, members });
+            }
+        });
+    });
+
     // --- Messages (Text, Media, Reply, Forward, Pin) ---
     socket.on('send_message', (data) => {
         if (!socket.username) return;

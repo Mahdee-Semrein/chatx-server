@@ -18,6 +18,11 @@ const db = initDB();
 
 // إعداد مجلد لرفع الملفات (صور، فيديو، صوت، مستندات)
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+const fs = require('fs');
+if (!fs.existsSync('uploads')) {
+    fs.mkdirSync('uploads');
+}
+
 const storage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, 'uploads/'),
     filename: (req, file, cb) => {

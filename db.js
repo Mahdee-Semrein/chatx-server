@@ -84,4 +84,3 @@ function initDB() {
 }
 
 module.exports = initDB;
-

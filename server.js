@@ -174,7 +174,7 @@ io.on('connection', (socket) => {
         const { group_id } = data;
         if (!socket.username || !group_id) return;
         
-        db.run(DELETE FROM group_members WHERE group_id = ? AND username = ?, [group_id, socket.username], function(err) {
+        db.run('DELETE FROM group_members WHERE group_id = ? AND username = ?', [group_id, socket.username], function(err) {
             if (err) {
                 console.error(err);
                 return;
@@ -328,5 +328,6 @@ io.on('connection', (socket) => {
 
 const PORT = 3000;
 server.listen(PORT, '0.0.0.0', () => console.log(`Server is running on http://0.0.0.0:${PORT}`));
+
 
 

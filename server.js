@@ -170,6 +170,18 @@ io.on('connection', (socket) => {
         });
     });
 
+    socket.on('leave_group', (data) => {
+        const { group_id } = data;
+        if (!socket.username || !group_id) return;
+        
+        db.run(DELETE FROM group_members WHERE group_id = ? AND username = ?, [group_id, socket.username], function(err) {
+            if (err) {
+                console.error(err);
+                return;
+            }
+            socket.emit('left_group_success', { group_id });
+        });
+    });
     socket.on('get_groups', () => {
         if (!socket.username) return;
         db.all("SELECT g.* FROM chat_groups g JOIN group_members gm ON g.id = gm.group_id WHERE gm.username = ?", [socket.username], (err, rows) => {
@@ -316,3 +328,5 @@ io.on('connection', (socket) => {
 
 const PORT = 3000;
 server.listen(PORT, '0.0.0.0', () => console.log(`Server is running on http://0.0.0.0:${PORT}`));
+
+

@@ -177,7 +177,7 @@ io.on('connection', (socket) => {
                 allMembers.forEach(member => {
                     db.run("INSERT INTO group_members (group_id, username) VALUES (?, ?)", [groupId, member]);
                     if (connectedUsers[member]) {
-                        io.to(connectedUsers[member]).emit('group_created', { id: groupId, name, group_pic });
+                        io.to(connectedUsers[member]).emit('group_created', { id: groupId, name, group_pic, created_by: socket.username, is_locked: 0 });
                     }
                 });
             }
@@ -198,20 +198,96 @@ io.on('connection', (socket) => {
     });
     socket.on('get_groups', () => {
         if (!socket.username) return;
-        db.all("SELECT g.* FROM chat_groups g JOIN group_members gm ON g.id = gm.group_id WHERE gm.username = ?", [socket.username], (err, rows) => {
+        db.all("SELECT g.*, ifnull(g.is_locked, 0) as is_locked FROM chat_groups g JOIN group_members gm ON g.id = gm.group_id WHERE gm.username = ?", [socket.username], (err, rows) => {
             if (!err) socket.emit('groups_list', { groups: rows });
         });
     });
 
     socket.on('get_group_members', (data) => {
         const { group_id } = data;
-        db.all("SELECT username FROM group_members WHERE group_id = ?", [group_id], (err, rows) => {
+        db.all("SELECT gm.username, u.profile_pic FROM group_members gm JOIN users u ON gm.username = u.username WHERE gm.group_id = ?", [group_id], (err, rows) => {
             if (!err) {
+                // backward compatibility + new data
                 const members = rows.map(r => r.username);
-                socket.emit('group_members_list', { group_id, members });
+                socket.emit('group_members_list', { group_id, members, members_data: rows });
             }
         });
     });
+    // --- Group Admin Endpoints ---
+    socket.on('update_group_pic', (data) => {
+        const { group_id, group_pic } = data;
+        if (!socket.username || !group_id) return;
+        
+        db.get("SELECT created_by FROM chat_groups WHERE id = ?", [group_id], (err, row) => {
+            if (row) { // Any member can update? Or just admin? The prompt says "???? ?????? ... ????" but group pic "????? ??? ???? ???????", usually any member can change group pic, but let's allow it for anyone in the group.
+                db.run("UPDATE chat_groups SET group_pic = ? WHERE id = ?", [group_pic, group_id], (err) => {
+                    if (!err) {
+                        db.all("SELECT username FROM group_members WHERE group_id = ?", [group_id], (e, members) => {
+                            if (!e) {
+                                members.forEach(m => {
+                                    if (connectedUsers[m.username]) {
+                                        io.to(connectedUsers[m.username]).emit('group_pic_updated', { group_id, group_pic });
+                                    }
+                                });
+                            }
+                        });
+                    }
+                });
+            }
+        });
+    });
+
+    socket.on('remove_group_member', (data) => {
+        const { group_id, member_username } = data;
+        if (!socket.username || !group_id) return;
+        
+        db.get("SELECT created_by FROM chat_groups WHERE id = ?", [group_id], (err, row) => {
+            if (row && row.created_by === socket.username) {
+                db.run("DELETE FROM group_members WHERE group_id = ? AND username = ?", [group_id, member_username], (err) => {
+                    if (!err) {
+                        // notify the kicked member
+                        if (connectedUsers[member_username]) {
+                            io.to(connectedUsers[member_username]).emit('kicked_from_group', { group_id });
+                        }
+                        // notify others
+                        db.all("SELECT username FROM group_members WHERE group_id = ?", [group_id], (e, members) => {
+                            if (!e) {
+                                members.forEach(m => {
+                                    if (connectedUsers[m.username]) {
+                                        io.to(connectedUsers[m.username]).emit('member_removed', { group_id, member_username });
+                                    }
+                                });
+                            }
+                        });
+                    }
+                });
+            }
+        });
+    });
+
+    socket.on('toggle_group_lock', (data) => {
+        const { group_id, is_locked } = data; // 1 or 0
+        if (!socket.username || !group_id) return;
+
+        db.get("SELECT created_by FROM chat_groups WHERE id = ?", [group_id], (err, row) => {
+            if (row && row.created_by === socket.username) {
+                db.run("UPDATE chat_groups SET is_locked = ? WHERE id = ?", [is_locked, group_id], (err) => {
+                    if (!err) {
+                        db.all("SELECT username FROM group_members WHERE group_id = ?", [group_id], (e, members) => {
+                            if (!e) {
+                                members.forEach(m => {
+                                    if (connectedUsers[m.username]) {
+                                        io.to(connectedUsers[m.username]).emit('group_lock_updated', { group_id, is_locked });
+                                    }
+                                });
+                            }
+                        });
+                    }
+                });
+            }
+        });
+    });
+
 
     // --- Messages (Text, Media, Reply, Forward, Pin) ---
     socket.on('send_message', (data) => {

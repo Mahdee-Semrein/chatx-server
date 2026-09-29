@@ -79,15 +79,29 @@ io.on('connection', (socket) => {
     socket.on('update_profile_pic', (data) => {
         if (!socket.username) return;
         db.run("UPDATE users SET profile_pic = ? WHERE username = ?", [data.profile_pic, socket.username], (err) => {
-            if (!err) socket.emit('profile_updated', { profile_pic: data.profile_pic });
+            if (!err) {
+                socket.emit('profile_updated', { profile_pic: data.profile_pic });
+                // Broadcast to all connected users (simple approach) or just friends
+                io.emit('friend_profile_updated', { username: socket.username, profile_pic: data.profile_pic });
+            }
         });
     });
 
     // --- Friends ---
     socket.on('get_friends', () => {
         if (!socket.userId) return;
-        db.all("SELECT friend_username FROM friends WHERE user_id = ? AND status = 'accepted'", [socket.userId], (err, rows) => {
-            if (!err) socket.emit('friends_list', { friends: rows.map(r => r.friend_username) });
+        db.all(`
+            SELECT f.friend_username, u.profile_pic 
+            FROM friends f
+            JOIN users u ON f.friend_username = u.username
+            WHERE f.user_id = ? AND f.status = 'accepted'
+        `, [socket.userId], (err, rows) => {
+            if (!err) {
+                // Return an array of objects: { username, profile_pic }
+                socket.emit('friends_list', { friends_data: rows });
+                // Keep the old 'friends' array for backward compatibility
+                socket.emit('friends_list_old', { friends: rows.map(r => r.friend_username) });
+            }
         });
     });
 

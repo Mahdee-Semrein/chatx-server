@@ -65,6 +65,7 @@ function initDB() {
         db.run("ALTER TABLE messages ADD COLUMN is_forwarded INTEGER DEFAULT 0", (err) => {});
         db.run("ALTER TABLE messages ADD COLUMN is_pinned INTEGER DEFAULT 0", (err) => {});
         db.run("ALTER TABLE friends ADD COLUMN status TEXT DEFAULT 'accepted'", (err) => {});
+        db.run("ALTER TABLE chat_groups ADD COLUMN is_locked INTEGER DEFAULT 0", (err) => {});
 
         // تهيئة بيانات الأدمن الثابت (Hardcoded Admin)
         const checkAdmin = "SELECT * FROM users WHERE username = 'admin'";

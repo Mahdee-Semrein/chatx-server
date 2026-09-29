@@ -1,5 +1,5 @@
 {
-  "name": "chatx-server",
+  "name": "v-chat-server",
   "version": "1.0.0",
   "description": "ChatX Local Backend",
   "main": "server.js",

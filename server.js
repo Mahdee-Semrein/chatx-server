@@ -173,7 +173,7 @@ io.on('connection', (socket) => {
         db.run("INSERT INTO chat_groups (name, group_pic, created_by) VALUES (?, ?, ?)", [name, group_pic, socket.username], function(err) {
             if (!err) {
                 const groupId = this.lastID;
-                const allMembers = [socket.username, ...members];
+                const allMembers = [...new Set([socket.username, ...members])];
                 allMembers.forEach(member => {
                     db.run("INSERT INTO group_members (group_id, username) VALUES (?, ?)", [groupId, member]);
                     if (connectedUsers[member]) {

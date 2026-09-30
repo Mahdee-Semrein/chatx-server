@@ -2,7 +2,7 @@ const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 
 function initDB() {
-    const dbPath = path.resolve(__dirname, 'chatx.db');
+    const dbPath = path.resolve(__dirname, 'VChat.db');
     const db = new sqlite3.Database(dbPath, (err) => {
         if (err) {
             console.error("خطأ في الاتصال بقاعدة البيانات", err.message);
@@ -59,6 +59,7 @@ function initDB() {
         // محاولة إضافة الأعمدة الجديدة إن لم تكن موجودة (التحديثات)
         db.run("ALTER TABLE users ADD COLUMN email TEXT", (err) => {});
         db.run("ALTER TABLE users ADD COLUMN profile_pic TEXT", (err) => {});
+        db.run("ALTER TABLE users ADD COLUMN fcm_token TEXT", (err) => {});
         db.run("ALTER TABLE messages ADD COLUMN hidden_from TEXT", (err) => {});
         db.run("ALTER TABLE messages ADD COLUMN group_id INTEGER", (err) => {});
         db.run("ALTER TABLE messages ADD COLUMN reply_to INTEGER", (err) => {});
@@ -71,7 +72,7 @@ function initDB() {
         const checkAdmin = "SELECT * FROM users WHERE username = 'admin'";
         db.get(checkAdmin, [], (err, row) => {
             if (!row) {
-                const insertAdmin = "INSERT INTO users (username, email, password, role) VALUES ('admin', 'admin@chatx.local', 'admin123', 'admin')";
+                const insertAdmin = "INSERT INTO users (username, email, password, role) VALUES ('admin', 'admin@VChat.local', 'admin123', 'admin')";
                 db.run(insertAdmin, [], function(err) {
                     if (!err) {
                         console.log("تم إضافة حساب الأدمن الافتراضي.");

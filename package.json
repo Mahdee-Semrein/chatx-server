@@ -1,12 +1,13 @@
 {
-  "name": "chatx-server",
+  "name": "VChat-server",
   "version": "1.0.0",
-  "description": "ChatX Local Backend",
+  "description": "VChat Local Backend",
   "main": "server.js",
   "dependencies": {
     "express": "^4.18.2",
     "multer": "^2.4.0",
     "socket.io": "^4.7.2",
-    "sqlite3": "^5.1.6"
+    "sqlite3": "^5.1.6",
+    "firebase-admin": "^11.11.0"
   }
 }

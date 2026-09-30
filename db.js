@@ -67,6 +67,13 @@ function initDB() {
         db.run("ALTER TABLE messages ADD COLUMN is_pinned INTEGER DEFAULT 0", (err) => {});
         db.run("ALTER TABLE friends ADD COLUMN status TEXT DEFAULT 'accepted'", (err) => {});
         db.run("ALTER TABLE chat_groups ADD COLUMN is_locked INTEGER DEFAULT 0", (err) => {});
+        db.run("ALTER TABLE group_members ADD COLUMN role TEXT DEFAULT 'member'", (err) => {
+            if (!err) {
+                // If column was just added, migrate existing creators
+                db.run("UPDATE group_members SET role = 'creator' WHERE username IN (SELECT created_by FROM chat_groups WHERE id = group_members.group_id)");
+            }
+        });
+        db.run("ALTER TABLE group_members ADD COLUMN nickname TEXT", (err) => {});
 
         // تهيئة بيانات الأدمن الثابت (Hardcoded Admin)
         const checkAdmin = "SELECT * FROM users WHERE username = 'admin'";

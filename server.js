@@ -199,7 +199,8 @@ io.on('connection', (socket) => {
                 const groupId = this.lastID;
                 const allMembers = [...new Set([socket.username, ...members])];
                 allMembers.forEach(member => {
-                    db.run("INSERT INTO group_members (group_id, username) VALUES (?, ?)", [groupId, member]);
+                    const role = (member === socket.username) ? 'creator' : 'member';
+                    db.run("INSERT INTO group_members (group_id, username, role) VALUES (?, ?, ?)", [groupId, member, role]);
                     if (connectedUsers[member]) {
                         io.to(connectedUsers[member]).emit('group_created', { id: groupId, name, group_pic, created_by: socket.username, is_locked: 0 });
                     }
@@ -222,14 +223,14 @@ io.on('connection', (socket) => {
     });
     socket.on('get_groups', () => {
         if (!socket.username) return;
-        db.all("SELECT g.*, ifnull(g.is_locked, 0) as is_locked FROM chat_groups g JOIN group_members gm ON g.id = gm.group_id WHERE gm.username = ?", [socket.username], (err, rows) => {
+        db.all("SELECT g.*, ifnull(g.is_locked, 0) as is_locked, gm.role FROM chat_groups g JOIN group_members gm ON g.id = gm.group_id WHERE gm.username = ?", [socket.username], (err, rows) => {
             if (!err) socket.emit('groups_list', { groups: rows });
         });
     });
 
     socket.on('get_group_members', (data) => {
         const { group_id } = data;
-        db.all("SELECT gm.username, u.profile_pic FROM group_members gm JOIN users u ON gm.username = u.username WHERE gm.group_id = ?", [group_id], (err, rows) => {
+        db.all("SELECT gm.username, gm.role, gm.nickname, u.profile_pic FROM group_members gm JOIN users u ON gm.username = u.username WHERE gm.group_id = ?", [group_id], (err, rows) => {
             if (!err) {
                 // backward compatibility + new data
                 const members = rows.map(r => r.username);
@@ -265,20 +266,23 @@ io.on('connection', (socket) => {
         const { group_id, member_username } = data;
         if (!socket.username || !group_id) return;
         
-        db.get("SELECT created_by FROM chat_groups WHERE id = ?", [group_id], (err, row) => {
-            if (row && row.created_by === socket.username) {
-                db.run("DELETE FROM group_members WHERE group_id = ? AND username = ?", [group_id, member_username], (err) => {
-                    if (!err) {
-                        // notify the kicked member
-                        if (connectedUsers[member_username]) {
-                            io.to(connectedUsers[member_username]).emit('kicked_from_group', { group_id });
-                        }
-                        // notify others
-                        db.all("SELECT username FROM group_members WHERE group_id = ?", [group_id], (e, members) => {
-                            if (!e) {
-                                members.forEach(m => {
-                                    if (connectedUsers[m.username]) {
-                                        io.to(connectedUsers[m.username]).emit('member_removed', { group_id, member_username });
+        db.get("SELECT role FROM group_members WHERE group_id = ? AND username = ?", [group_id, socket.username], (err, row) => {
+            if (row && (row.role === 'admin' || row.role === 'creator')) {
+                // Prevent kicking creators
+                db.get("SELECT role FROM group_members WHERE group_id = ? AND username = ?", [group_id, member_username], (err, targetRow) => {
+                    if (targetRow && targetRow.role !== 'creator') {
+                        db.run("DELETE FROM group_members WHERE group_id = ? AND username = ?", [group_id, member_username], (err) => {
+                            if (!err) {
+                                if (connectedUsers[member_username]) {
+                                    io.to(connectedUsers[member_username]).emit('kicked_from_group', { group_id });
+                                }
+                                db.all("SELECT username FROM group_members WHERE group_id = ?", [group_id], (e, members) => {
+                                    if (!e) {
+                                        members.forEach(m => {
+                                            if (connectedUsers[m.username]) {
+                                                io.to(connectedUsers[m.username]).emit('member_removed', { group_id, member_username });
+                                            }
+                                        });
                                     }
                                 });
                             }
@@ -290,11 +294,11 @@ io.on('connection', (socket) => {
     });
 
     socket.on('toggle_group_lock', (data) => {
-        const { group_id, is_locked } = data; // 1 or 0
+        const { group_id, is_locked } = data;
         if (!socket.username || !group_id) return;
 
-        db.get("SELECT created_by FROM chat_groups WHERE id = ?", [group_id], (err, row) => {
-            if (row && row.created_by === socket.username) {
+        db.get("SELECT role FROM group_members WHERE group_id = ? AND username = ?", [group_id, socket.username], (err, row) => {
+            if (row && (row.role === 'admin' || row.role === 'creator')) {
                 db.run("UPDATE chat_groups SET is_locked = ? WHERE id = ?", [is_locked, group_id], (err) => {
                     if (!err) {
                         db.all("SELECT username FROM group_members WHERE group_id = ?", [group_id], (e, members) => {
@@ -311,6 +315,53 @@ io.on('connection', (socket) => {
             }
         });
     });
+
+    socket.on('set_group_role', (data) => {
+        const { group_id, member_username, role } = data; // role = 'admin' or 'member'
+        if (!socket.username || !group_id) return;
+
+        db.get("SELECT role FROM group_members WHERE group_id = ? AND username = ?", [group_id, socket.username], (err, row) => {
+            if (row && row.role === 'creator') { // only creator can promote/demote admins for simplicity, or admin can? let's allow creator only
+                db.run("UPDATE group_members SET role = ? WHERE group_id = ? AND username = ? AND role != 'creator'", [role, group_id, member_username], (err) => {
+                    if (!err) {
+                        db.all("SELECT username FROM group_members WHERE group_id = ?", [group_id], (e, members) => {
+                            if (!e) {
+                                members.forEach(m => {
+                                    if (connectedUsers[m.username]) {
+                                        io.to(connectedUsers[m.username]).emit('group_role_updated', { group_id, member_username, role });
+                                    }
+                                });
+                            }
+                        });
+                    }
+                });
+            }
+        });
+    });
+
+    socket.on('set_group_nickname', (data) => {
+        const { group_id, member_username, nickname } = data;
+        if (!socket.username || !group_id) return;
+
+        db.get("SELECT role FROM group_members WHERE group_id = ? AND username = ?", [group_id, socket.username], (err, row) => {
+            if (row && (row.role === 'admin' || row.role === 'creator')) {
+                db.run("UPDATE group_members SET nickname = ? WHERE group_id = ? AND username = ?", [nickname, group_id, member_username], (err) => {
+                    if (!err) {
+                        db.all("SELECT username FROM group_members WHERE group_id = ?", [group_id], (e, members) => {
+                            if (!e) {
+                                members.forEach(m => {
+                                    if (connectedUsers[m.username]) {
+                                        io.to(connectedUsers[m.username]).emit('group_nickname_updated', { group_id, member_username, nickname });
+                                    }
+                                });
+                            }
+                        });
+                    }
+                });
+            }
+        });
+    });
+
 
 
 // Helper function for push notifications
@@ -337,41 +388,55 @@ async function sendPushNotification(username, title, body, payload) {
         const { receiver, group_id, content, type, reply_to, is_forwarded } = data;
         const sender = socket.username;
 
-        db.run(
-            "INSERT INTO messages (sender, receiver, group_id, content, type, reply_to, is_forwarded) VALUES (?, ?, ?, ?, ?, ?, ?)", 
-            [sender, receiver, group_id, content, type, reply_to, is_forwarded ? 1 : 0], 
-            function(err) {
-                if (!err) {
-                    const msgData = { 
-                        id: this.lastID, sender, receiver, group_id, content, type, 
-                        reply_to, is_forwarded, is_pinned: 0, timestamp: new Date() 
-                    };
-                    
-                    const notificationTitle = group_id ? `New message in group` : `Message from ${sender}`;
-                    const notificationBody = type === 'text' ? content : `Sent a ${type}`;
+        const performSend = () => {
+            db.run(
+                "INSERT INTO messages (sender, receiver, group_id, content, type, reply_to, is_forwarded) VALUES (?, ?, ?, ?, ?, ?, ?)", 
+                [sender, receiver, group_id, content, type, reply_to, is_forwarded ? 1 : 0], 
+                function(err) {
+                    if (!err) {
+                        const msgData = { 
+                            id: this.lastID, sender, receiver, group_id, content, type, 
+                            reply_to, is_forwarded, is_pinned: 0, timestamp: new Date() 
+                        };
+                        
+                        const notificationTitle = group_id ? `New message in group` : `Message from ${sender}`;
+                        const notificationBody = type === 'text' ? content : `Sent a ${type}`;
 
-                    if (group_id) {
-                        db.all("SELECT username FROM group_members WHERE group_id = ?", [group_id], (err, members) => {
-                            members.forEach(m => {
-                                if (m.username !== sender) {
-                                    if (connectedUsers[m.username]) {
-                                        io.to(connectedUsers[m.username]).emit('receive_message', msgData);
+                        if (group_id) {
+                            db.all("SELECT username FROM group_members WHERE group_id = ?", [group_id], (err, members) => {
+                                members.forEach(m => {
+                                    if (m.username !== sender) {
+                                        if (connectedUsers[m.username]) {
+                                            io.to(connectedUsers[m.username]).emit('receive_message', msgData);
+                                        }
+                                        sendPushNotification(m.username, notificationTitle, notificationBody, { type: 'chat', group_id: group_id.toString() });
                                     }
-                                    sendPushNotification(m.username, notificationTitle, notificationBody, { type: 'chat', group_id: group_id.toString() });
-                                }
+                                });
                             });
-                        });
-                        socket.emit('message_sent', msgData);
-                    } else {
-                        if (connectedUsers[receiver]) {
-                            io.to(connectedUsers[receiver]).emit('receive_message', msgData);
+                            socket.emit('message_sent', msgData);
+                        } else {
+                            if (connectedUsers[receiver]) {
+                                io.to(connectedUsers[receiver]).emit('receive_message', msgData);
+                            }
+                            sendPushNotification(receiver, notificationTitle, notificationBody, { type: 'chat', sender: sender });
+                            socket.emit('message_sent', msgData);
                         }
-                        sendPushNotification(receiver, notificationTitle, notificationBody, { type: 'chat', sender: sender });
-                        socket.emit('message_sent', msgData);
                     }
                 }
-            }
-        );
+            );
+        };
+
+        if (group_id) {
+            db.get("SELECT g.is_locked, gm.role FROM chat_groups g JOIN group_members gm ON g.id = gm.group_id WHERE g.id = ? AND gm.username = ?", [group_id, sender], (err, row) => {
+                if (row && row.is_locked && row.role === 'member') {
+                    socket.emit('error_msg', { message: 'Only admins can send messages in this group.' });
+                    return;
+                }
+                performSend();
+            });
+        } else {
+            performSend();
+        }
     });
 
     socket.on('get_messages', (data) => {

@@ -97,7 +97,7 @@ io.on('connection', (socket) => {
         const { email, username, password } = data;
         db.get("SELECT * FROM users WHERE username = ? OR email = ?", [username, email], (err, row) => {
             if (row) {
-                socket.emit('register_error', { message: 'اسم المستخدم أو البريد موجود مسبقاً' });
+                socket.emit('register_error', { message: 'user_exists' });
             } else {
                 db.run("INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, ?)", [username, email, password, 'user'], function(err) {
                     if (!err) {
@@ -311,6 +311,45 @@ io.on('connection', (socket) => {
                             }
                         });
                     }
+                });
+            }
+        });
+    });
+
+    socket.on('add_group_member', (data) => {
+        const { group_id, new_member_username } = data;
+        if (!socket.username || !group_id || !new_member_username) return;
+
+        db.get("SELECT role FROM group_members WHERE group_id = ? AND username = ?", [group_id, socket.username], (err, row) => {
+            if (row && (row.role === 'admin' || row.role === 'creator')) {
+                // Check if user exists
+                db.get("SELECT id FROM users WHERE username = ?", [new_member_username], (err, userRow) => {
+                    if (!userRow) {
+                        socket.emit('add_group_member_error', { message: 'user_not_found' });
+                        return;
+                    }
+                    // Check if already in group
+                    db.get("SELECT id FROM group_members WHERE group_id = ? AND username = ?", [group_id, new_member_username], (err, memRow) => {
+                        if (memRow) {
+                            socket.emit('add_group_member_error', { message: 'already_in_group' });
+                            return;
+                        }
+                        db.run("INSERT INTO group_members (group_id, username, role) VALUES (?, ?, 'member')", [group_id, new_member_username], (err) => {
+                            if (!err) {
+                                socket.emit('add_group_member_success', { message: 'member_added' });
+                                // Notify all members to refresh
+                                db.all("SELECT username FROM group_members WHERE group_id = ?", [group_id], (e, members) => {
+                                    if (!e) {
+                                        members.forEach(m => {
+                                            if (connectedUsers[m.username]) {
+                                                io.to(connectedUsers[m.username]).emit('group_members_list_update', { group_id });
+                                            }
+                                        });
+                                    }
+                                });
+                            }
+                        });
+                    });
                 });
             }
         });

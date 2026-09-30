@@ -112,6 +112,23 @@ io.on('connection', (socket) => {
         });
     });
 
+    socket.on('reset_password', (data) => {
+        const { username, email, new_password } = data;
+        db.get("SELECT * FROM users WHERE username = ? AND email = ?", [username, email], (err, row) => {
+            if (row) {
+                db.run("UPDATE users SET password = ? WHERE username = ?", [new_password, username], (err) => {
+                    if (!err) {
+                        socket.emit('reset_password_success', { message: 'Password updated successfully' });
+                    } else {
+                        socket.emit('reset_password_error', { message: 'Failed to update password' });
+                    }
+                });
+            } else {
+                socket.emit('reset_password_error', { message: 'invalid_credentials' });
+            }
+        });
+    });
+
     socket.on('update_profile_pic', (data) => {
         if (!socket.username) return;
         db.run("UPDATE users SET profile_pic = ? WHERE username = ?", [data.profile_pic, socket.username], (err) => {
@@ -133,6 +150,16 @@ io.on('connection', (socket) => {
         });
     });
 
+    socket.on('update_display_name', (data) => {
+        if (!socket.username) return;
+        db.run("UPDATE users SET display_name = ? WHERE username = ?", [data.display_name, socket.username], (err) => {
+            if (!err) {
+                socket.emit('display_name_updated', { display_name: data.display_name });
+                io.emit('friend_display_name_updated', { username: socket.username, display_name: data.display_name });
+            }
+        });
+    });
+
     socket.on('update_fcm_token', (data) => {
         if (!socket.username) return;
         db.run("UPDATE users SET fcm_token = ? WHERE username = ?", [data.fcm_token, socket.username], (err) => {
@@ -144,7 +171,7 @@ io.on('connection', (socket) => {
     socket.on('get_friends', () => {
         if (!socket.userId) return;
         db.all(`
-            SELECT f.friend_username, u.profile_pic, u.bio
+            SELECT f.friend_username, u.profile_pic, u.bio, u.display_name
             FROM friends f
             JOIN users u ON f.friend_username = u.username
             WHERE f.user_id = ? AND f.status = 'accepted'
@@ -154,6 +181,7 @@ io.on('connection', (socket) => {
                     username: r.friend_username,
                     profile_pic: r.profile_pic,
                     bio: r.bio,
+                    display_name: r.display_name,
                     is_online: !!connectedUsers[r.friend_username]
                 }));
                 socket.emit('friends_list', { friends_data: friendsData });
@@ -224,6 +252,23 @@ io.on('connection', (socket) => {
         });
     });
 
+    socket.on('remove_friend', (data) => {
+        if (!socket.userId || !socket.username) return;
+        const { friend_username } = data;
+        db.get("SELECT id FROM users WHERE username = ?", [friend_username], (err, row) => {
+            if (!row) return;
+            db.run("DELETE FROM friends WHERE (user_id = ? AND friend_username = ?) OR (user_id = ? AND friend_username = ?)", 
+                [socket.userId, friend_username, row.id, socket.username], (err) => {
+                if (!err) {
+                    socket.emit('friend_removed', { friend_username: friend_username });
+                    if (connectedUsers[friend_username]) {
+                        io.to(connectedUsers[friend_username]).emit('friend_removed', { friend_username: socket.username });
+                    }
+                }
+            });
+        });
+    });
+
     // --- Groups ---
     socket.on('create_group', (data) => {
         if (!socket.username) return;
@@ -264,7 +309,7 @@ io.on('connection', (socket) => {
 
     socket.on('get_group_members', (data) => {
         const { group_id } = data;
-        db.all("SELECT gm.username, gm.role, gm.nickname, u.profile_pic FROM group_members gm JOIN users u ON gm.username = u.username WHERE gm.group_id = ?", [group_id], (err, rows) => {
+        db.all("SELECT gm.username, gm.role, gm.nickname, u.profile_pic, u.display_name FROM group_members gm JOIN users u ON gm.username = u.username WHERE gm.group_id = ?", [group_id], (err, rows) => {
             if (!err) {
                 // backward compatibility + new data
                 const members = rows.map(r => r.username);
@@ -348,6 +393,9 @@ io.on('connection', (socket) => {
                         db.run("INSERT INTO group_members (group_id, username, role) VALUES (?, ?, 'member')", [group_id, new_member_username], (err) => {
                             if (!err) {
                                 socket.emit('add_group_member_success', { message: 'member_added' });
+                                if (connectedUsers[new_member_username]) {
+                                    io.to(connectedUsers[new_member_username]).emit('added_to_group', { group_id });
+                                }
                                 // Notify all members to refresh
                                 db.all("SELECT username FROM group_members WHERE group_id = ?", [group_id], (e, members) => {
                                     if (!e) {

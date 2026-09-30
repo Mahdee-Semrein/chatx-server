@@ -56,6 +56,24 @@ app.post('/upload', upload.single('file'), (req, res) => {
 
 const connectedUsers = {};
 
+function broadcastStatus(username, is_online) {
+    db.all(`
+        SELECT friend_username FROM friends 
+        WHERE user_id = (SELECT id FROM users WHERE username = ?) AND status = 'accepted'
+    `, [username], (err, rows) => {
+        if (!err) {
+            rows.forEach(r => {
+                if (connectedUsers[r.friend_username]) {
+                    io.to(connectedUsers[r.friend_username]).emit('friend_status_updated', {
+                        username: username,
+                        is_online: is_online
+                    });
+                }
+            });
+        }
+    });
+}
+
 io.on('connection', (socket) => {
     console.log(`[+] هاتف متصل: ${socket.id}`);
 
@@ -68,6 +86,7 @@ io.on('connection', (socket) => {
                 socket.username = username;
                 socket.userId = row.id;
                 socket.emit('login_success', { user: row });
+                broadcastStatus(username, true);
             } else {
                 socket.emit('login_error', { message: 'بيانات غير صحيحة' });
             }
@@ -86,6 +105,7 @@ io.on('connection', (socket) => {
                         socket.username = username;
                         socket.userId = this.lastID;
                         socket.emit('register_success', { user: { id: this.lastID, username, email, role: 'user', profile_pic: null } });
+                        broadcastStatus(username, true);
                     }
                 });
             }
@@ -120,9 +140,12 @@ io.on('connection', (socket) => {
             WHERE f.user_id = ? AND f.status = 'accepted'
         `, [socket.userId], (err, rows) => {
             if (!err) {
-                // Return an array of objects: { username, profile_pic }
-                socket.emit('friends_list', { friends_data: rows });
-                // Keep the old 'friends' array for backward compatibility
+                const friendsData = rows.map(r => ({
+                    username: r.friend_username,
+                    profile_pic: r.profile_pic,
+                    is_online: !!connectedUsers[r.friend_username]
+                }));
+                socket.emit('friends_list', { friends_data: friendsData });
                 socket.emit('friends_list_old', { friends: rows.map(r => r.friend_username) });
             }
         });
@@ -527,7 +550,10 @@ async function sendPushNotification(username, title, body, payload) {
     });
 
     socket.on('disconnect', () => {
-        if (socket.username) delete connectedUsers[socket.username];
+        if (socket.username) {
+            delete connectedUsers[socket.username];
+            broadcastStatus(socket.username, false);
+        }
         console.log(`[-] هاتف غير متصل: ${socket.id}`);
     });
 });

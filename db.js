@@ -75,6 +75,7 @@ function initDB() {
         });
         db.run("ALTER TABLE group_members ADD COLUMN nickname TEXT", (err) => {});
         db.run("ALTER TABLE users ADD COLUMN bio TEXT", (err) => {});
+        db.run("ALTER TABLE users ADD COLUMN display_name TEXT", (err) => {});
 
         // تهيئة بيانات الأدمن الثابت (Hardcoded Admin)
         const checkAdmin = "SELECT * FROM users WHERE username = 'admin'";

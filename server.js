@@ -167,7 +167,7 @@ io.on('connection', (socket) => {
                     if (!friendRow) {
                         db.run("INSERT INTO friends (user_id, friend_username, status) VALUES (?, ?, 'pending')", [socket.userId, friend_username], (err) => {
                             if (!err) {
-                                socket.emit('add_friend_success', { message: 'تم إرسال طلب الصداقة بنجاح' });
+                                socket.emit('add_friend_success', { message: 'friend_request_sent' });
                                 if (connectedUsers[friend_username]) {
                                     io.to(connectedUsers[friend_username]).emit('friend_request_received', { from: socket.username });
                                 }
@@ -175,12 +175,12 @@ io.on('connection', (socket) => {
                             }
                         });
                     } else if (friendRow.status === 'pending') {
-                        socket.emit('add_friend_error', { message: 'لقد قمت بإرسال طلب سابقاً وهو قيد الانتظار' });
+                        socket.emit('add_friend_error', { message: 'friend_request_already_sent' });
                     } else {
-                        socket.emit('add_friend_error', { message: 'هذا المستخدم صديقك بالفعل' });
+                        socket.emit('add_friend_error', { message: 'already_friends' });
                     }
                 });
-            } else socket.emit('add_friend_error', { message: 'المستخدم غير موجود' });
+            } else socket.emit('add_friend_error', { message: 'user_not_found' });
         });
     });
 

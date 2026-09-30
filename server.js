@@ -8,10 +8,20 @@ const cors = require('cors');
 const fs = require('fs');
 
 const admin = require('firebase-admin');
-const serviceAccount = require('./serviceAccountKey.json');
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
-});
+let serviceAccount;
+try {
+    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+        serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    } else {
+        serviceAccount = require('./serviceAccountKey.json');
+    }
+    admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount)
+    });
+    console.log("Firebase Admin Initialized Successfully.");
+} catch (error) {
+    console.warn("Firebase Admin Initialization Failed: Please provide serviceAccountKey.json or FIREBASE_SERVICE_ACCOUNT env var. Push notifications will not work.");
+}
 
 const app = express();
 app.use(cors({ origin: "*" }));
@@ -305,6 +315,7 @@ io.on('connection', (socket) => {
 
 // Helper function for push notifications
 async function sendPushNotification(username, title, body, payload) {
+    if (admin.apps.length === 0) return; // Do not send if Firebase is not initialized
     db.get("SELECT fcm_token FROM users WHERE username = ?", [username], (err, row) => {
         if (row && row.fcm_token) {
             const message = {

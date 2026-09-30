@@ -246,7 +246,7 @@ io.on('connection', (socket) => {
     });
     socket.on('get_groups', () => {
         if (!socket.username) return;
-        db.all("SELECT g.*, ifnull(g.is_locked, 0) as is_locked, gm.role FROM chat_groups g JOIN group_members gm ON g.id = gm.group_id WHERE gm.username = ?", [socket.username], (err, rows) => {
+        db.all("SELECT g.*, ifnull(g.is_locked, 0) as is_locked, gm.role, (SELECT GROUP_CONCAT(ifnull(nickname, username)) FROM group_members WHERE group_id = g.id AND username != ?) as members_list FROM chat_groups g JOIN group_members gm ON g.id = gm.group_id WHERE gm.username = ?", [socket.username, socket.username], (err, rows) => {
             if (!err) socket.emit('groups_list', { groups: rows });
         });
     });

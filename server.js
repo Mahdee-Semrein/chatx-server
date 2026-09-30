@@ -5,6 +5,13 @@ const initDB = require('./db');
 const multer = require('multer');
 const path = require('path');
 const cors = require('cors');
+const fs = require('fs');
+
+const admin = require('firebase-admin');
+const serviceAccount = require('./serviceAccountKey.json');
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
 
 const app = express();
 app.use(cors({ origin: "*" }));
@@ -87,6 +94,13 @@ io.on('connection', (socket) => {
         });
     });
 
+    socket.on('update_fcm_token', (data) => {
+        if (!socket.username) return;
+        db.run("UPDATE users SET fcm_token = ? WHERE username = ?", [data.fcm_token, socket.username], (err) => {
+            if (err) console.error("Error updating FCM token:", err);
+        });
+    });
+
     // --- Friends ---
     socket.on('get_friends', () => {
         if (!socket.userId) return;
@@ -125,6 +139,7 @@ io.on('connection', (socket) => {
                                 if (connectedUsers[friend_username]) {
                                     io.to(connectedUsers[friend_username]).emit('friend_request_received', { from: socket.username });
                                 }
+                                sendPushNotification(friend_username, "Friend Request", `${socket.username} sent you a friend request.`, { type: 'friend_request', sender: socket.username });
                             }
                         });
                     } else if (friendRow.status === 'pending') {
@@ -289,6 +304,22 @@ io.on('connection', (socket) => {
     });
 
 
+// Helper function for push notifications
+async function sendPushNotification(username, title, body, payload) {
+    db.get("SELECT fcm_token FROM users WHERE username = ?", [username], (err, row) => {
+        if (row && row.fcm_token) {
+            const message = {
+                notification: { title: title, body: body },
+                data: payload || {},
+                token: row.fcm_token
+            };
+            admin.messaging().send(message)
+                .then(response => console.log('Successfully sent push notification:', response))
+                .catch(error => console.error('Error sending push notification:', error));
+        }
+    });
+}
+
     // --- Messages (Text, Media, Reply, Forward, Pin) ---
     socket.on('send_message', (data) => {
         if (!socket.username) return;
@@ -306,11 +337,17 @@ io.on('connection', (socket) => {
                         reply_to, is_forwarded, is_pinned: 0, timestamp: new Date() 
                     };
                     
+                    const notificationTitle = group_id ? `New message in group` : `Message from ${sender}`;
+                    const notificationBody = type === 'text' ? content : `Sent a ${type}`;
+
                     if (group_id) {
                         db.all("SELECT username FROM group_members WHERE group_id = ?", [group_id], (err, members) => {
                             members.forEach(m => {
-                                if (connectedUsers[m.username] && m.username !== sender) {
-                                    io.to(connectedUsers[m.username]).emit('receive_message', msgData);
+                                if (m.username !== sender) {
+                                    if (connectedUsers[m.username]) {
+                                        io.to(connectedUsers[m.username]).emit('receive_message', msgData);
+                                    }
+                                    sendPushNotification(m.username, notificationTitle, notificationBody, { type: 'chat', group_id: group_id.toString() });
                                 }
                             });
                         });
@@ -319,6 +356,7 @@ io.on('connection', (socket) => {
                         if (connectedUsers[receiver]) {
                             io.to(connectedUsers[receiver]).emit('receive_message', msgData);
                         }
+                        sendPushNotification(receiver, notificationTitle, notificationBody, { type: 'chat', sender: sender });
                         socket.emit('message_sent', msgData);
                     }
                 }
@@ -398,7 +436,10 @@ io.on('connection', (socket) => {
 
     // --- WebRTC ---
     socket.on('webrtc_offer', (data) => {
-        if (connectedUsers[data.receiver]) io.to(connectedUsers[data.receiver]).emit('webrtc_offer', { sender: socket.username, offer: data.offer });
+        if (connectedUsers[data.receiver]) {
+            io.to(connectedUsers[data.receiver]).emit('webrtc_offer', { sender: socket.username, offer: data.offer });
+        }
+        sendPushNotification(data.receiver, "Incoming Call", `Incoming call from ${socket.username}`, { type: 'call', sender: socket.username });
     });
     socket.on('webrtc_answer', (data) => {
         if (connectedUsers[data.receiver]) io.to(connectedUsers[data.receiver]).emit('webrtc_answer', { sender: socket.username, answer: data.answer });

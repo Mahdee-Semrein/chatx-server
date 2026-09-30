@@ -123,6 +123,16 @@ io.on('connection', (socket) => {
         });
     });
 
+    socket.on('update_bio', (data) => {
+        if (!socket.username) return;
+        db.run("UPDATE users SET bio = ? WHERE username = ?", [data.bio, socket.username], (err) => {
+            if (!err) {
+                socket.emit('bio_updated', { bio: data.bio });
+                io.emit('friend_bio_updated', { username: socket.username, bio: data.bio });
+            }
+        });
+    });
+
     socket.on('update_fcm_token', (data) => {
         if (!socket.username) return;
         db.run("UPDATE users SET fcm_token = ? WHERE username = ?", [data.fcm_token, socket.username], (err) => {
@@ -134,7 +144,7 @@ io.on('connection', (socket) => {
     socket.on('get_friends', () => {
         if (!socket.userId) return;
         db.all(`
-            SELECT f.friend_username, u.profile_pic 
+            SELECT f.friend_username, u.profile_pic, u.bio
             FROM friends f
             JOIN users u ON f.friend_username = u.username
             WHERE f.user_id = ? AND f.status = 'accepted'
@@ -143,6 +153,7 @@ io.on('connection', (socket) => {
                 const friendsData = rows.map(r => ({
                     username: r.friend_username,
                     profile_pic: r.profile_pic,
+                    bio: r.bio,
                     is_online: !!connectedUsers[r.friend_username]
                 }));
                 socket.emit('friends_list', { friends_data: friendsData });
